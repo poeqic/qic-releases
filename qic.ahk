@@ -18,14 +18,14 @@ SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
 SetBatchLines, -1
 FileEncoding, utf-8
 
-#Include, lib/Gdip_All.ahk
+#Include, qic-files/lib/Gdip_All.ahk
 ; https://www.autohotkey.com/boards/viewtopic.php?t=1879
-#Include, lib/Gdip_Ext.ahk
+#Include, qic-files/lib/Gdip_Ext.ahk
 ; https://github.com/cocobelgica/AutoHotkey-JSON
-#Include, lib/JSON.ahk
+#Include, qic-files/lib/JSON.ahk
 
 Menu, tray, Tip, Path of Exile - QIC (Quasi-In-Chat) Search
-Menu, tray, Icon, resource/qic$.ico
+Menu, tray, Icon, qic-files/resource/qic$.ico
 
 If (A_AhkVersion <= "1.1.22"){
     msgbox, You need AutoHotkey v1.1.22 or later to run this script. `n`nPlease go to http://ahkscript.org/download and download a recent version.
@@ -62,7 +62,7 @@ global TextToDraw = ""
 global experimentalLogFilePath := GetPoELogFileFromRegistry()
 global selectedFile := ReadValueFromIni("PoEClientLogFile", experimentalLogFilePath, "System")
 global iniFilePath := "../overlay_config.ini"
-global Leagues := ReadLeagues("terms/leagues.txt")
+global Leagues := ReadLeagues("qic-files/terms/leagues.txt")
 global searchLeague := 
 global PlayerList := [] ; array of strings
 global searchTermPrefix := 
