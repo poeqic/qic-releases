@@ -25,7 +25,7 @@ FileEncoding, utf-8
 #Include, qic-files/lib/JSON.ahk
 
 Menu, tray, Tip, Path of Exile - QIC (Quasi-In-Chat) Search
-Menu, tray, Icon, qic-files/resource/qic$.ico
+Menu, tray, Icon, resource/qic$.ico
 
 If (A_AhkVersion <= "1.1.22"){
     msgbox, You need AutoHotkey v1.1.22 or later to run this script. `n`nPlease go to http://ahkscript.org/download and download a recent version.
