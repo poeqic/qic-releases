@@ -45,6 +45,9 @@ body {
 		&:hover {
 			text-decoration: none;
 		}
+		&.reset {
+			color: #870000;
+		}
 	}
 }
 
@@ -69,7 +72,7 @@ a {
 		width: 60px;
 		height: 60px;
 		background-size: cover;
-		background-image: url('../../resource/qic$.ico');
+		background-image: url('../q.png');
 		margin-right: 10px;
 	}
 }

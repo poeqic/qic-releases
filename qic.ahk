@@ -25,7 +25,7 @@ FileEncoding, utf-8
 #Include, qic-files/lib/JSON.ahk
 
 Menu, tray, Tip, Path of Exile - QIC (Quasi-In-Chat) Search
-Menu, tray, Icon, resource/qic$.ico
+Menu, tray, Icon, resource/q-tray.ico
 
 If (A_AhkVersion <= "1.1.22"){
     msgbox, You need AutoHotkey v1.1.22 or later to run this script. `n`nPlease go to http://ahkscript.org/download and download a recent version.
@@ -39,26 +39,18 @@ If !pToken := Gdip_Startup()
 }
 OnExit, Exit
 
-; Set Hotkey for toggling GUI overlay completely OFF, default = ctrl + q
-; ^p and ^i conflicts with trackpetes ItemPriceCheck macro
-Hotkey, ^q, ToggleGUI
-; Set Hotkeys for browsing through search results
-Hotkey, PgUp, PreviousPage
-Hotkey, PgDn, NextPage
-
-StringReplace, param1, parm1, $LF, `n, All
-StringReplace, param2, parm2, $LF, `n, All
 global poeWindowName = "Path of Exile ahk_class Direct3DWindowClass"
 global poeWinID := WinExist(poeWindowName)
 global isFullScreen := isWindowedFullScreen(poeWinID)
 global debugActive := 
-global PageSize := 5
+global PageSize := 
 global PageNumbers := 0
 global ResultPages := []
 global SearchResults := []
 global SearchResultsWTB := []
 global LastSelectedPage := 1
 global TextToDraw = ""
+global TooltipText := "text"
 global experimentalLogFilePath := GetPoELogFileFromRegistry()
 global selectedFile := ReadValueFromIni("PoEClientLogFile", experimentalLogFilePath, "System")
 global iniFilePath := "../overlay_config.ini"
@@ -68,17 +60,32 @@ global PlayerList := [] ; array of strings
 global searchTermPrefix := 
 global searchTerm := 
 global lastSearch := 
-global ItemResults =
-global useSimpleText := 0
+global ItemResults = 
 global poeWindowXpos :=
 global poeWindowYpos :=
 global poeWindowWidth :=
 global poeWindowHeight :=
 global GuiON := 1
 global Font := CheckFont("Arial")
+global FontSize :=
+global tWidth :=
+global TextDrawTriggeredBySearch :=
+global searchDuration :=
+global searchStatus :=
+global invalidSearchTerms :=
 lastTimeStamp := 0
 
 Gosub, ReadIniValues
+
+; Set Hotkey for toggling GUI overlay completely OFF, default = ctrl + q
+; ^p and ^i conflicts with trackpetes ItemPriceCheck macro
+ToggleHotKey := ReadValueFromIni("ToggleGUIHotkey","^q", "Hotkeys")
+Hotkey, %ToggleHotKey%, ToggleGUI
+; Set Hotkeys for browsing through search results
+PreviousPageHotKey := ReadValueFromIni("ToggleGUIHotkey","PgUp", "Hotkeys")
+NextPageKey := ReadValueFromIni("ToggleGUIHotkey","PgDn", "Hotkeys")
+Hotkey, PgUp, PreviousPage
+Hotkey, PgDn, NextPage
 
 FileRead, BIGFILE, %selectedFile%
 StringGetPos, charCount, BIGFILE,`n, R2 ; Init charCount to the location of the 2nd last location of `n. Note that Client.txt always has a trailing newline
@@ -111,29 +118,13 @@ WriteDebugLog(debug)
 ; ow4         - Sets the outline width to 4
 ; ocFF000000  - Sets the outline colour to opaque black
 ; OF1			- If this option is set to 1 the text fill will be drawn using the same path that the outline is drawn.
-AHKArchitecture := (A_PtrSize = 4 ? 32 : 64)
-AHKEncoding := (A_IsUnicode ? "Unicode" : "ANSI")
-If ((AHKEncoding != "Unicode") && (AHKArchitecture = 32) || (AHKArchitecture = 32)) {
-	Options = x5 y5 w%tWidth% h%tHeight% Left cffffffff r4 s%FontSize%
-	useSimpleText := 1
-	;;; DEBUG	
-	debug := "Using Text without Outline."
-	WriteDebugLog(debug)
-	;;;
-}
-Else {
-	Options = x5 y5 w%tWidth% h%tHeight% Left cffffffff ow2 ocFF000000 OF1 r4 s%FontSize%
-	useSimpleText := 0
-	;;; DEBUG	
-	debug := "Using Text with Outline."
-	WriteDebugLog(debug)
-	;;;
-}
+
+Options = x5 y5 w%tWidth% h%tHeight% Left cffffffff ow2 ocFF000000 OF1 r4 s%FontSize%
 
 Gui, 1:  -Caption +E0x80000 +LastFound +OwnDialogs +Owner +AlwaysOnTop
-
 hwnd1 := WinExist()
-hbm := CreateDIBSection(DrawingAreaWidth, DrawingAreaHeight)
+
+hbm := CreateDIBSection(DrawingAreaWidth+150, DrawingAreaHeight+150)
 hdc := CreateCompatibleDC()
 obm := SelectObject(hdc, hbm)
 G := Gdip_GraphicsFromHDC(hdc)
@@ -195,9 +186,9 @@ GetAndSetDimensions:
 	DrawingAreaPosY 	:= ReadValueFromIni("AbsolutePositionTop", poeWindowYpos + windowTitlebarHeight + 5)
 	DrawingAreaHeight	:= ReadValueFromIni("Height", (poeWindowHeight - windowTitlebarHeight - 50))
 	FontSize 			:= ReadValueFromIni("FontSize", 13)
-	PageSize 			:= ReadValueFromIni("PageSize", 5)
+	PageSize 			:= ReadValueFromIni("PageSize", 0)
 	tWidth := DrawingAreaWidth - 8
-	tHeight := DrawingAreaHeight - 8	
+	tHeight := DrawingAreaHeight - 8
 	
 	debug := "Recalculated Dimensions/Positions of " "Path Of Exile Window: Xpos=" poeWindowXpos ", Ypos=" poeWindowYpos ", Width=" poeWindowWidth ", Height=" poeWindowHeight
 	WriteDebugLog(debug)
@@ -211,8 +202,19 @@ ReadIniValues:
 	debugActive := ReadValueFromIni("DebugMode", 0 , "System")
 	selectedFile := ReadValueFromIni("PoEClientLogFile", experimentalLogFilePath, "System")
 	searchLeague := ReadValueFromIni("SearchLeague", , "Search")
-	searchTermPrefix := ReadValueFromIni("SearchTermPrefix", , "Search") " " searchLeague " " 	
+	searchTermPrefix := ReadValueFromIni("SearchTermPrefix", , "Search") " " searchLeague " "
+	validPlayer := ReadValueFromIni("ValidChars", "", "ValidCharacters")
+	StringReplace , validPlayer, validPlayer, %A_Space%,,All
+	PlayerList := _Split(validPlayer, ",")
 return
+
+; ------------------ SPLIT STRING TO REAL ARRAY (PSEUDO ARRAY OTHERWISE) ------------------ 
+_Split(String,At) {
+	Array:={}
+	Loop, Parse, String, % At
+		Array[A_Index]:=A_LoopField
+	Return Array
+}
 
 ; ------------------ TOGGLE GUI ------------------
 #IfWinActive, Path of Exile ahk_class Direct3DWindowClass 
@@ -258,12 +260,18 @@ Return
 ; ------------------ Draw TEXT TO OVERLAY ------------------ 
 DrawText:
 	Gui, 1: Show, NA
-	If (useSimpleText = 0) {
-		Gdip_TextToGraphicsOutline(G, TextToDraw, Options, Font, DrawingAreaWidth, DrawingAreaHeight)
+
+	If TextDrawTriggeredBySearch {
+		TextDrawTriggeredBySearch := 0
+		prepareTooltip("Request duration: " cFloor(searchDuration) "ms.")
 	}
-	Else {
-		Gdip_TextToGraphics(G, TextToDraw, Options, Font, DrawingAreaWidth, DrawingAreaHeight)
+	If (searchStatus = "INVALID" || invalidSearchTerms.MaxIndex() > 0) {
+		searchStatus := ""
+		prepareTooltip("Search contained invalid terms.")
+		;invalidSearchTerms
 	}
+
+	Gdip_TextToGraphicsOutline(G, TextToDraw, Options, Font, DrawingAreaWidth, DrawingAreaHeight)
 	UpdateLayeredWindow(hwnd1, hdc, DrawingAreaPosX, DrawingAreaPosY, DrawingAreaWidth, DrawingAreaHeight)
 	;;; DEBUG	
 	debug := "Text drawn to overlay."
@@ -305,12 +313,19 @@ ReadValueFromIni(IniKey, DefaultValue = "", Section = "Overlay"){
 	IniRead, OutputVar, %iniFilePath%, %Section%, %IniKey%
 	If !OutputVar
 		OutputVar := DefaultValue
+
 	Return OutputVar
 }
 
 ; ------------------ WRITE TO INI ------------------
 WriteValueToIni(IniKey,NewValue,IniSection){
 	IniWrite, %NewValue%, %iniFilePath%, %IniSection%, %IniKey%
+	If ErrorLevel
+		s := "Writing to config failed."
+	Else
+		s := "Config updated."
+	
+	prepareTooltip(s)
 	Gosub, ReadIniValues
 }
 
@@ -336,227 +351,340 @@ CheckFont(DefaultFont){
 ; ------------------ PAGE SEARCH RESULTS ------------------
 PageSearchResults:
 	LastSelectedPage := 1
-	Temp := ItemObjectsToString(ItemResults)
-	SearchResults := Temp[1]
-	SearchResultsWTB := Temp[2]
-	PageNumbers := ceil(SearchResults.MaxIndex() / PageSize)
-	ResultPages := []
+	StartTime := A_TickCount
 	
-	If PageNumbers = 0
-		PageNumbers := 1
-
-	LastIndex = 0
-	Loop %PageNumbers%
-	{	
-		If !searchLeague
-			league := "League Placeholder"
-		Page := searchLeague " | Page " A_Index "/" PageNumbers " " "`r`n"
-		Loop %PageSize%
-		{
-			Page .= SearchResults[A_Index+LastIndex]
-		}
-		If !SearchResults[1] {
-			Page .= "_______________________________________________" "`r`n" "`r`n"
-			Page .= "0 search results."
-		}
-		LastIndex := PageSize * A_Index
-		ResultPages.Insert(Page)
+	h :=
+	LastIndex = 1		 
+	Page := searchLeague " | Page " LastIndex "`r`n"
+	ResultPages := []	
+	
+	MaxItems := ItemResults.MaxIndex()	
+	; In case of static pagesize
+	If (PageSize > 0) {
+		PageNumbers := ceil(MaxItems / PageSize)
 	}
 	
-	;;; DEBUG	
-	debug := "Search results paged."
-	WriteDebugLog(debug)
-	;;;
-	Draw(ResultPages[LastSelectedPage])
-Return
-
-; ------------------ RETURN PRINTABLE ITEMS ------------------ 
-ItemObjectsToString(ObjectArray){
-	oa := ObjectArray
-	o := []
-	d := []
-	s := 	
-	smallSeperator := "-----------"
-	bigSeperator := "_______________________________________________"
-	; !!!!!!!!!!!!!!!! Gem/Map Level, Quantity Stack !!!!!!!!!!!!!!!!
-	
-	for i, e in oa {
-		su =
-		wtb = 
-		; Add item index, name, sockets and quality			
-		su .= bigSeperator "`r`n"
-		su .= "[" e.id "] " e.name
-		wtb .= "@" e.ign " Hi, I would like to buy your " e.name " listed for """ StringToUpper(e.buyout) """ in " e.league " with the following Stats:"
-		If e.socketsRaw {
-			su .= " " e.socketsRaw 
-			wtb .= " Sockets " e.socketsRaw
-		}
-		If e.quality {			
-			su .= " Q" cFloor(e.quality) "%"
-			wtb .= " Q" cFloor(e.quality) "%"
+	; Read Results item per item and draw the first Page as soon as we have enough items to fill a page	
+	For j, el in ItemResults 
+	{
+		result := ItemObjectToString(el)
+		SearchResultsWTB.Insert(result["wtb"])
+		
+		If (PageSize > 1) {
+			SearchResults.Insert(result["print"])
 		}		
-		If e.mapQuantity {
-			su .= "`r`n" "Quantity: " cFloor(e.mapQuantity) "%"
-			wtb .= " Quant. " cFloor(e.mapQuantity) "%"
-		}
-		If e.mapRarity {
-			su .= "`r`n" "Rarity: " cFloor(e.mapRarity) "%"
-			wtb .= " Qual. " cFloor(e.mapRarity) "%"
-		}
 		
-		; Add implicit mod
-		If e.implicitMod {
-			su .= "`r`n"
-			temp := RegExReplace(e.implicitMod.name, "#|\$",,,1)
-			temp := StrReplace(temp, "#", cFloor(e.implicitMod.value))
-			su .= temp
-			wtb .= " --- " temp
-		}
-		
-		; Add explicit mods
-		If (e.explicitMods.MaxIndex() > 0 || e.identified = 0) {
-			su .=  "`r`n" smallSeperator
-		}
-		If e.explicitMods.MaxIndex() > 0 {
+		; Use dynamic PageSize
+		If (result &&(PageSize < 1)) {
+			h += result["print"].itemHeight
 			
-			for j, f in e.explicitMods {
-				temp := StrReplace(f.name, "#",,,1)
-				; Handle div cards
-				temp2 := 
-				While RegExMatch(temp, "(\{.*?\})", match) {
-					temp := RegExReplace(temp, "(\{.*?\})",,,1)
-					temp2 .= RegExReplace(match, "\{|\}") " "
-				}
-				If temp2 {
-					temp := temp2
-				}
-				; Insert value into name
-				If (f.value > 0){
-					temp := StrReplace(temp, "#", cFloor(f.value))
-				}				
-				su .= "`r`n" temp
-				wtb .= " --- " temp
-			}
-		}	
-		; Unidentified Tag
-		If e.identified = 0 {
-			su .= "`r`n" "Unidentified"
-		}
-		su .= "`r`n" smallSeperator "`r`n"
+			; + 20 because of the Page-Header
+			If ((h+20) > tHeight) {
+				; Add page to Array, reset some variables for a new page
+				ResultPages.Insert(Page)	
+				LastIndex := ResultPages.MaxIndex()				
+				Page := searchLeague " | Page " LastIndex+1 "`r`n" 				
+				h := 0
 				
-		; Corrupted Tag
-		If e.corrupted = 1 {
-			su .= "Corrupted" "`r`n"
-			wtb .= " --- Corrupted" 
-		}
-		
-		; Add defenses
-		If e.armourAtMaxQuality || e.energyShieldAtMaxQuality || e.evasionAtMaxQuality || e.block {
-			defenseFound := 1
-			If e.armourAtMaxQuality && e.energyShieldAtMaxQuality { 
-				temp := "AR: " cFloor(e.armourAtMaxQuality) " " "ES: " cFloor(e.energyShieldAtMaxQuality)				
-			}
-			Else If e.armourAtMaxQuality && e.evasionAtMaxQuality {
-				temp := "AR: " cFloor(e.armourAtMaxQuality) " " "EV: " cFloor(e.evasionAtMaxQuality)
-			}
-			Else If e.evasionAtMaxQuality && e.energyShieldAtMaxQuality {
-				temp := "EV: " cFloor(e.evasionAtMaxQuality) " " "ES: " cFloor(e.energyShieldAtMaxQuality)
-			}
-			Else If e.armourAtMaxQuality  {
-				temp := "AR: " cFloor(e.armourAtMaxQuality)
-			}
-			Else If e.evasionAtMaxQuality  {
-				temp := "EV: " cFloor(e.evasionAtMaxQuality)
-			}
-			Else If e.energyShieldAtMaxQuality  {
-				temp := "ES: " cFloor(e.energyShieldAtMaxQuality)
-			}
-			Else If e.armourAtMaxQuality && e.evasionAtMaxQuality && e.energyShieldAtMaxQuality {
-				temp := "AR: " cFloor(e.armourAtMaxQuality) " " "EV: " cFloor(e.evasionAtMaxQuality) " " "ES: " cFloor(e.energyShieldAtMaxQuality)
-			}
-			su .= temp
-			wtb .= " --- @MaxQuality " temp 
-			If e.block {
-				su .= " Block: " cFloor(e.block)
-				wtb .= " Block: " cFloor(e.block)
-			}
-		}
-		
-		; Add pdps, edps, aps and critchance
-		; Don't add critchance if it's a skillgem/map (e.level set)
-		If e.physDmgAtMaxQuality || e.eleDmg || e.attackSpeed || (e.crit && !varExist(e.level)){
-			damageFound := 1
-			temp := 
-			If e.physDmgAtMaxQuality {
-				temp .= "pDPS " Floor(e.physDmgAtMaxQuality) " "
-			}
-			If e.eleDmg {
-				temp .= "eDPS " Floor(e.eleDmg) " "
-			}
-			If e.attackSpeed {
-				temp .= "APS " cFloor(e.attackSpeed) " "
-			}
-			If e.crit {
-				temp .= "CC " cFloor(e.crit)
-			}
-			su .= temp
-			wtb .= " --- @MaxQuality " temp
-		}
-		
-		If e.level || e.stackSize {
-			stuffFound := 1
-			If e.level {
-				If varExist(e.mapQuantity) {
-					su .= "Tier: " cFloor(e.level)
-					wtb .= "--- Tier " cFloor(e.level)
+				; Add current item to new Page
+				Page .= result["print"].itemText
+				h += result["print"].itemHeight
+				
+				; Draw the first page as soon as it's ready
+				If ResultPages.MaxIndex() = 1 {
+					Draw(ResultPages[LastSelectedPage])
+					;ElapsedTime := A_TickCount - StartTime
+					;MsgBox % ElapsedTime
 				}
-				Else {
-					su .= "Level: " cFloor(e.level)
-					wtb .= "--- Level " cFloor(e.level)
-				}				
 			}
-			If e.stackSize {
-				su .= "Quantity: " cFloor(e.stackSize)
+			; Add last page
+			Else If (j = MaxItems) {
+				Page .= result["print"].itemText
+				h += result["print"].itemHeight
+				ResultPages.Insert(Page)		
+				LastIndex := ResultPages.MaxIndex()	
 			}
-			su .= "`r`n"
-		}
-		
-		; Add requirements
-		If e.reqLvl || e.reqStr || e.reqInt || e.reqDex {
-			requirementsFound := 1
-			If defenseFound || damageFound {
-				su .= " | "
+			Else {
+				If !searchLeague
+					league := "League Placeholder"
+				
+				Page .= result["print"].itemText
 			}
-			If e.reqLvl {
-				su .= "reqLvl " cFloor(e.reqLvl) " "
-			}
-			If e.reqStr {
-				su .= "Str " cFloor(e.reqStr) " "
-			}
-			If e.reqInt {
-				su .= "Int " cFloor(e.reqInt) " "
-			}
-			If e.reqDex {
-				su .= "Dex " cFloor(e.reqDex)
-			}
-		}
-		If (defenseFound || damageFound || requirementsFound) {
-			su .= "`r`n"
-		}		
-		
-		; Add price, ign
-		su .= e.buyout " " "IGN: " e.ign "`r`n"
-		o[i] := su
-		d[i] := wtb
+			PageNumbers := ResultPages.MaxIndex()			
+		}	
 	}
+		
+	; Use static PageSize
+	If (PageSize > 0) {		
+		If (PageNumbers = 0) {
+			PageNumbers := 1
+		}
+			
+		LastIndex = 0
+		
+		Loop %PageNumbers%
+		{	
+			If !searchLeague
+				league := "League Placeholder"
+			
+			Page := searchLeague " | Page " A_Index "/" PageNumbers " " "`r`n"
 
-	temp := [o, d]
+			Loop %PageSize%
+			{
+				Page .= SearchResults[A_Index+LastIndex].itemText
+			}
+			If !SearchResults.MaxIndex() {
+				Page .= "_______________________________________________" "`r`n" "`r`n"
+				Page .= "0 search results."
+			}
+			LastIndex := PageSize * A_Index
+			ResultPages.Insert(Page)					
+		}
+		Draw(ResultPages[LastSelectedPage])
+	}
+	; Add amount of max Pages to Page-Headers when known
+	Else {		
+		For i, e in ResultPages 
+		{	
+			s := 
+			StringReplace, s, e, `r`n,/ %LastIndex% `r`n
+			ResultPages[i] := s
+		}
+	}
+	
 	;;; DEBUG	
 	debug := "Item print view created."
 	WriteDebugLog(debug)
 	;;;
-	return temp
+Return
+
+; ------------------ RETURN PRINTABLE ITEMS ------------------ 
+ItemObjectToString(itemObject){
+	e := itemObject
+	s := 	
+	smallSeperator := "-----------"
+	bigSeperator := "_______________________________________________"	
+	
+	su =
+	wtb = 
+	; Add item index, name, sockets and quality			
+	su .= bigSeperator "`r`n"
+	su .= "[" e.id "] " e.name
+	wtb .= "@" e.ign " Hi, I would like to buy your " e.name " listed for """ StringToUpper(e.buyout) """ in " e.league " with the following Stats:"
+	If e.socketsRaw {
+		su .= " " e.socketsRaw 
+		wtb .= " Sockets " e.socketsRaw
+	}
+	If e.quality {			
+		su .= " Q" cFloor(e.quality) "%"
+		wtb .= " Q" cFloor(e.quality) "%"
+	}		
+	If e.mapQuantity {
+		su .= "`r`n" "Quantity: " cFloor(e.mapQuantity) "%"
+		wtb .= " Quant. " cFloor(e.mapQuantity) "%"
+	}
+	If e.mapRarity {
+		su .= "`r`n" "Rarity: " cFloor(e.mapRarity) "%"
+		wtb .= " Qual. " cFloor(e.mapRarity) "%"
+	}
+	
+	; Add implicit mod
+	If e.implicitMod {
+		su .= "`r`n"
+		temp := RegExReplace(e.implicitMod.name, "#|\$",,,1)
+		temp := StrReplace(temp, "#", cFloor(e.implicitMod.value))
+		su .= temp
+		wtb .= " --- " temp
+	}
+	
+	; Add explicit mods
+	If (e.explicitMods.MaxIndex() > 0 || e.identified = 0) {
+		su .=  "`r`n" smallSeperator
+	}
+	If e.explicitMods.MaxIndex() > 0 {
+		
+		for j, f in e.explicitMods {
+			temp := 
+			If (f.affix) {
+				temp := "[" f.affix f.tier "] "
+			}
+			replaced := StrReplace(f.name, "@")
+			temp .= StrReplace(replaced, "#",,,1)
+			; Handle div cards
+			temp2 := 
+			While RegExMatch(temp, "(\{.*?\})", match) {
+				temp := RegExReplace(temp, "(\{.*?\})",,,1)
+				temp2 .= RegExReplace(match, "\{|\}") " "
+			}
+			If temp2 {
+				temp := temp2
+			}
+			; Insert value into name
+			If (f.value > 0){
+				temp := StrReplace(temp, "#", cFloor(f.value))
+			}				
+			su .= "`r`n" temp
+			wtb .= " --- " temp
+		}
+	}	
+	; Unidentified Tag
+	If e.identified = 0 {
+		su .= "`r`n" "Unidentified"
+	}
+	su .= "`r`n" smallSeperator "`r`n"
+			
+	; Corrupted Tag
+	If e.corrupted = 1 {
+		su .= "Corrupted" "`r`n"
+		wtb .= " --- Corrupted" 
+	}
+	
+	; Add defenses
+	If e.armourAtMaxQuality || e.energyShieldAtMaxQuality || e.evasionAtMaxQuality || e.block {
+		defenseFound := 1
+		If e.armourAtMaxQuality && e.energyShieldAtMaxQuality { 
+			temp := "AR: " cFloor(e.armourAtMaxQuality) " " "ES: " cFloor(e.energyShieldAtMaxQuality)				
+		}
+		Else If e.armourAtMaxQuality && e.evasionAtMaxQuality {
+			temp := "AR: " cFloor(e.armourAtMaxQuality) " " "EV: " cFloor(e.evasionAtMaxQuality)
+		}
+		Else If e.evasionAtMaxQuality && e.energyShieldAtMaxQuality {
+			temp := "EV: " cFloor(e.evasionAtMaxQuality) " " "ES: " cFloor(e.energyShieldAtMaxQuality)
+		}
+		Else If e.armourAtMaxQuality  {
+			temp := "AR: " cFloor(e.armourAtMaxQuality)
+		}
+		Else If e.evasionAtMaxQuality  {
+			temp := "EV: " cFloor(e.evasionAtMaxQuality)
+		}
+		Else If e.energyShieldAtMaxQuality  {
+			temp := "ES: " cFloor(e.energyShieldAtMaxQuality)
+		}
+		Else If e.armourAtMaxQuality && e.evasionAtMaxQuality && e.energyShieldAtMaxQuality {
+			temp := "AR: " cFloor(e.armourAtMaxQuality) " " "EV: " cFloor(e.evasionAtMaxQuality) " " "ES: " cFloor(e.energyShieldAtMaxQuality)
+		}
+		su .= temp
+		wtb .= " --- @MaxQuality " temp 
+		If e.block {
+			su .= " Block: " cFloor(e.block)
+			wtb .= " Block: " cFloor(e.block)
+		}
+	}
+	
+	; Add pdps, edps, aps and critchance
+	; Don't add critchance if it's a skillgem/map (e.level set)
+	If e.physDmgAtMaxQuality || e.eleDmg || e.attackSpeed || (e.crit && !varExist(e.level)){
+		damageFound := 1
+		temp := 
+		If e.physDmgAtMaxQuality {
+			temp .= "pDPS " Floor(e.physDmgAtMaxQuality) " "
+		}
+		If e.eleDmg {
+			temp .= "eDPS " Floor(e.eleDmg) " "
+		}
+		If e.attackSpeed {
+			temp .= "APS " cFloor(e.attackSpeed) " "
+		}
+		If e.crit {
+			temp .= "CC " cFloor(e.crit)
+		}
+		su .= temp
+		wtb .= " --- @MaxQuality " temp
+	}
+	
+	If e.level || e.stackSize {
+		If e.level {
+			If (e.reqLvl) {
+				su .= "Level: " cFloor(e.level)
+				wtb .= "--- Level " cFloor(e.level)
+			}
+			Else {
+				su .= "Tier: " cFloor(e.level)
+				wtb .= "--- Tier " cFloor(e.level)
+			}				
+		}
+		If e.stackSize {
+			su .= "Quantity: " cFloor(e.stackSize)
+		}
+		su .= "`r`n"
+	}
+	
+	; Add requirements
+	If e.reqLvl || e.reqStr || e.reqInt || e.reqDex {
+		requirementsFound := 1
+		If defenseFound || damageFound {
+			su .= " | "
+		}
+		If e.reqLvl {
+			su .= "reqLvl " cFloor(e.reqLvl) " "
+		}
+		If e.reqStr {
+			su .= "Str " cFloor(e.reqStr) " "
+		}
+		If e.reqInt {
+			su .= "Int " cFloor(e.reqInt) " "
+		}
+		If e.reqDex {
+			su .= "Dex " cFloor(e.reqDex)
+		}
+	}
+	If (defenseFound || damageFound || requirementsFound) {
+		su .= "`r`n"
+	}		
+	
+	; Add price, ign
+	su .= e.buyout " " "IGN: " e.ign "`r`n"
+	If (PageSize < 1){
+		itemHeight := calculateItemHeight(su)
+	}
+	Else {
+		itemHeight := "none"
+	}
+
+	o := []
+	o.itemHeight := itemHeight
+	o.itemText := su
+	result := { print: o, wtb: wtb }
+
+	return result
 }
+
+; ---------- CALCULATE THE ITEM BOX HEIGHT -----------------
+calculateItemHeight(s){
+	lineCount :=	
+	Loop, Parse, s, `n
+	{
+		T := MeasureText(A_LoopField, s%FontSize%, Font)
+		c := Ceil(T.W / tWidth)	
+		lineCount += c
+	}	
+	itemHeight := lineCount * (FontSize * 1.3)
+	
+	Return itemHeight
+}
+
+; ---------- MEASURE TEXT WIDTH -----------------
+MeasureText(Str, FontOpts = "", FontName = "") {
+   Static DT_FLAGS := 0x0520 ; DT_SINGLELINE = 0x20, DT_NOCLIP = 0x0100, DT_CALCRECT = 0x0400
+   Static WM_GETFONT := 0x31
+   Size := {}
+   Gui, New
+   If (FontOpts <> "") || (FontName <> "")
+      Gui, Font, %FontOpts%, %FontName%
+   Gui, Add, Text, hwndHWND
+   SendMessage, WM_GETFONT, 0, 0, , ahk_id %HWND%
+   HFONT := ErrorLevel
+   HDC := DllCall("User32.dll\GetDC", "Ptr", HWND, "Ptr")
+   DllCall("Gdi32.dll\SelectObject", "Ptr", HDC, "Ptr", HFONT)
+   VarSetCapacity(RECT, 16, 0)
+   DllCall("User32.dll\DrawText", "Ptr", HDC, "Str", Str, "Int", -1, "Ptr", &RECT, "UInt", DT_FLAGS)
+   DllCall("User32.dll\ReleaseDC", "Ptr", HWND, "Ptr", HDC)
+   Gui, Destroy
+   Size.W := NumGet(RECT,  8, "Int")
+   Size.H := NumGet(RECT, 12, "Int")
+   Return Size
+}
+
 
 ; ---------- CHECK IF VARIABLE EXISTS -----------------
 varExist(ByRef v) {
@@ -643,19 +771,29 @@ ParseLines(s){
 			StringGetPos, pos1, message, :		
 			If !ErrorLevel {
 				StringLeft, messagePrefix, message, pos1
+				StringReplace , messagePrefix, messagePrefix, %A_Space%,,All
 				; Exclude Global, Trade and Whisper messages
-				RegExMatch(messagePrefix, "[#$@]", excludedChannels)
-				
-				Loop % PlayerList.Length() {				
-					validPlayer := InStr(messagePrefix, PlayerList[A_Index])
-					If validPlayer > 0
-						Break
-					Else 
-						validPlayer :=
+				RegExMatch(messagePrefix, "[#$@]", excludedChannel)
+				; Remove the channel symbols from messagePrefix
+				messagePrefix := RegExReplace(messagePrefix, "[%&#$]")
+
+				; Check if ValidChars are specified in config and filter out parsed lines not from any of those characters
+				validPlayer :=
+				If (PlayerList[1]) {
+					For i, e in PlayerList {										
+						validPlayer := RegExMatch(e,"^" messagePrefix "$")
+						If (validPlayer > 0) {
+							excludedChannel :=
+							Break
+						}
+					}
 				}
-				
-				validPlayer := 1 ; placeholder variable, remove later when playernames can be validated
-				If !excludedChannels && validPlayer {
+				; Allow every name (nothing specified in config)
+				Else {
+					validPlayer := 1	
+				}
+
+				If !excludedChannel && validPlayer {
 					StringTrimLeft, message, message, pos1 + 2
 					StringReplace,message,message,`n,,A
 					StringReplace,message,message,`r,,A
@@ -678,6 +816,10 @@ GetResults(term, addition = ""){
 	parsedJSON 	:= JSON.Load(JSONFile)	
 	ItemResults 	:= parsedJSON.itemResults
 	searchLeague 	:= parsedJSON.league
+	searchDuration:= parsedJSON.searchDuration
+	searchStatus	:= parsedJSON.status
+	invalidSearchTerms := parsedJSON.invalidSearchTerms
+	TextDrawTriggeredBySearch := 1
 	;;; DEBUG	
 	debug := "JSON parsed."
 	WriteDebugLog(debug)
@@ -700,10 +842,16 @@ GetWTBMessage(index, prepareSending){
 		message := SearchResultsWTB[index] 
 		FormatTime, TimeString, T12, Time
 		wtb := "----------------------------------------------------------------------------------" "`r`n"
-		;wtb .= [%A_YYYY%/%A_MM%/%A_DD% %TimeString%]
 		wtb .= "[" A_YYYY "/" A_MM "/" A_DD " " TimeString "]"
 		wtb .= "`r`n" message "`r`n`r`n"
-		FileAppend, %wtb%, savedWTB_messages.txt
+		FileAppend, %wtb%, ../savedWTB_messages.txt
+		
+		If (ErrorLevel || message.length() = 0) {
+			s := "Saving WTB failed."
+		}		
+		Else 
+			s := "Saved WTB message."
+		prepareTooltip(s)
 	}	
 }
 
@@ -728,6 +876,55 @@ ListLeagues(){
 	
 	Draw(temp)
 }
+
+; ------------------ PREPARE TOOLTIP ------------------
+PrepareTooltip(s){
+	TooltipText := s
+	Gosub ShowTooltip
+}
+
+; ------------------ CREATE AND SHOW TOOLTIP WINDOW ------------------
+ShowTooltip:	
+	TooltipWidth := 200 
+	TooltipHeight:= 30
+	ToolTextWidth := TooltipWidth - 8
+	ToolTextHeight := TooltipHeight - 8
+	
+	Gui, 2:  -Caption +E0x80000 +LastFound +OwnDialogs +Owner +AlwaysOnTop
+	hwnd2 := WinExist()
+
+	hbm2 := CreateDIBSection(200, 30)
+	hdc2 := CreateCompatibleDC()
+	obm2 := SelectObject(hdc2, hbm2)
+	G2 := Gdip_GraphicsFromHDC(hdc2)
+	Gdip_SetSmoothingMode(G2, 4)	
+	
+	Gdip_GraphicsClear(G2)
+	pBrush := Gdip_BrushCreateSolid(0xffb4804b)
+	; left border
+	Gdip_FillRectangle(G2, pBrush, 0, 0, 1, TooltipHeight)
+	; right border
+	Gdip_FillRectangle(G2, pBrush, TooltipWidth - 2, 0, 1, TooltipHeight)
+	; top border
+	Gdip_FillRectangle(G2, pBrush, 0, 1, TooltipWidth, 1)
+	; bottom border
+	Gdip_FillRectangle(G2, pBrush, 0, TooltipHeight - 2, TooltipWidth, 1)
+	; background	
+	pBrush := Gdip_BrushCreateSolid(0x47000000)
+	Gdip_FillRectangle(G2, pBrush, 0, 0, TooltipWidth, TooltipHeight)
+	
+	Gui, 2: Show, NA
+	ToolSize := FontSize + 2
+	Options2 = x5 y5 w%ToolTextWidth% h%ToolTextHeight% Left cffffffff ow2 ocFF000000 OF1 r4 s%ToolSize%
+	Gdip_TextToGraphicsOutline(G2, TooltipText, Options2, Font, TooltipWidth, TooltipHeight)
+	UpdateLayeredWindow(hwnd2, hdc2, DrawingAreaPosX - TooltipWidth - 5, DrawingAreaPosY, TooltipWidth, TooltipHeight)
+	SetTimer, HideTooltip, -4000
+Return
+
+; ------------------ HIDE TOOLTIP AFTER DELAY ------------------
+HideTooltip:
+	Gui, 2: Hide
+Return
 
 ; ------------------ READ LEAGUES ------------------ 
 ReadLeagues(file){
@@ -767,10 +964,12 @@ ProcessLine(input){
 	
 	If StartsWith(input, "^s ") {
 		term := StrReplace(input, "s ",,,1)
+		prepareTooltip("Searching...")
 		GetResults(term)
 	}
 	Else If StartsWith(input, "^search ") {
 		term := StrReplace(input, "search ",,,1)
+		prepareTooltip("Searching...")
 		GetResults(term)
 	}	
 	Else If StartsWith(input, "^searchexit$") || StartsWith(input, "^sexit$") {
@@ -813,12 +1012,13 @@ ProcessLine(input){
 		; write pagesize to ini
 		Else If StartsWith(input, "^setps\d{1}$") {
 			option := RegExReplace(input, "setps")	
-			WriteValueToIni("PageSize",option,"Overlay")
+			WriteValueToIni("PageSize",option,"Overlay")			
 		}
 		; reload overlay_config.ini
 		Else If StartsWith(input, "^reload$") {
 			Gosub, ReadIniValues			
 			Gosub, PageSearchResults
+			prepareTooltip("Reloading config...")			
 		}
 		Else If StartsWith(input, "^listleagues") {
 			ListLeagues()
@@ -857,7 +1057,7 @@ WriteDebugLog(debugText){
 	FormatTime, TimeString, T12, Time
 	stamp = [%A_YYYY%/%A_MM%/%A_DD% %TimeString%]
 	stamp .= " " debugText "`r`n"
-	FileAppend, %stamp%, debug_log.txt
+	FileAppend, %stamp%, ../debug_log.txt
 }
 
 ; ------------------ CHECK IF WINDOW IS IN WINDOWED FULLSCREEN OR WINDOWED MODE ------------------ 

@@ -33,6 +33,8 @@ body {
     cursor: pointer; }
     .wrapper_fileFilter a:hover {
       text-decoration: none; }
+    .wrapper_fileFilter a.reset {
+      color: #870000; }
 
 a.link_github {
   font-size: 18px;
@@ -50,7 +52,7 @@ a.toggle-vis {
     width: 60px;
     height: 60px;
     background-size: cover;
-    background-image: url("../../resource/qic$.ico");
+    background-image: url("../q.png");
     margin-right: 10px; }
 
 .wrapper_headline > * {
