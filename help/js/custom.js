@@ -59,7 +59,7 @@ $(document).ready(function() {
 
 		do {
 			check = regexArray.some(function (i) {
-				reg = new RegExp('\\b' + i + '\\b');
+				reg = new RegExp('\\b' + i + '\\b', 'i');
 				var test = reg.test(s);
 				if (test) match = i;
 				return test;

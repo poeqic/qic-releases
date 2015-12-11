@@ -80,12 +80,11 @@ Gosub, ReadIniValues
 ; Set Hotkey for toggling GUI overlay completely OFF, default = ctrl + q
 ; ^p and ^i conflicts with trackpetes ItemPriceCheck macro
 ToggleHotKey := ReadValueFromIni("ToggleGUIHotkey","^q", "Hotkeys")
-Hotkey, %ToggleHotKey%, ToggleGUI
 ; Set Hotkeys for browsing through search results
-PreviousPageHotKey := ReadValueFromIni("ToggleGUIHotkey","PgUp", "Hotkeys")
-NextPageKey := ReadValueFromIni("ToggleGUIHotkey","PgDn", "Hotkeys")
-Hotkey, PgUp, PreviousPage
-Hotkey, PgDn, NextPage
+PreviousPageHotKey := ReadValueFromIni("PreviousPageHotKey","PgUp", "Hotkeys")
+NextPageKey := ReadValueFromIni("NextPageHotKey","PgDn", "Hotkeys")
+Hotkey, %PreviousPageHotKey%, PreviousPage
+Hotkey, %NextPageKey%, NextPage
 
 FileRead, BIGFILE, %selectedFile%
 StringGetPos, charCount, BIGFILE,`n, R2 ; Init charCount to the location of the 2nd last location of `n. Note that Client.txt always has a trailing newline
@@ -369,10 +368,7 @@ PageSearchResults:
 	{
 		result := ItemObjectToString(el)
 		SearchResultsWTB.Insert(result["wtb"])
-		
-		If (PageSize > 1) {
-			SearchResults.Insert(result["print"])
-		}		
+		SearchResults.Insert(result["print"])
 		
 		; Use dynamic PageSize
 		If (result &&(PageSize < 1)) {
@@ -451,7 +447,7 @@ PageSearchResults:
 			ResultPages[i] := s
 		}
 	}
-	
+
 	;;; DEBUG	
 	debug := "Item print view created."
 	WriteDebugLog(debug)
@@ -713,7 +709,7 @@ StringToUpper(s){
 ShowDetailedItem(index){
 	If !searchLeague
 		league := "League Placeholder"
-	View := searchLeague " | Detailed Item View" "`r`n" SearchResults[index+1]
+	View := searchLeague " | Detailed Item View" "`r`n" SearchResults[index+1].itemText
 	LastSelectedPage := Floor((index+1) / PageSize)
 	
 	Draw(View)
@@ -885,7 +881,7 @@ PrepareTooltip(s){
 
 ; ------------------ CREATE AND SHOW TOOLTIP WINDOW ------------------
 ShowTooltip:	
-	TooltipWidth := 200 
+	TooltipWidth := 250 
 	TooltipHeight:= 30
 	ToolTextWidth := TooltipWidth - 8
 	ToolTextHeight := TooltipHeight - 8
@@ -893,7 +889,8 @@ ShowTooltip:
 	Gui, 2:  -Caption +E0x80000 +LastFound +OwnDialogs +Owner +AlwaysOnTop
 	hwnd2 := WinExist()
 
-	hbm2 := CreateDIBSection(200, 30)
+	hbm2 := CreateDIBSection(	TooltipWidth := 250 
+, TooltipHeight)
 	hdc2 := CreateCompatibleDC()
 	obm2 := SelectObject(hdc2, hbm2)
 	G2 := Gdip_GraphicsFromHDC(hdc2)
@@ -956,6 +953,7 @@ ReadLeagues(file){
 ; ------------------ OPEN HELP ------------------ 
 OpenExternalHelpFile(){
 	Run, help\help.htm
+	prepareTooltip("Opening \qic-files\help\help.htm")
 }
 
 ; ------------------ PROCESS PARSED CLIENT.TXT LINE ------------------ 
@@ -1053,6 +1051,10 @@ WriteDebugLog(debugText){
 	If !debugActive {
 		Return
 	}
+	FileGetSize, FileSize, ../debug_log.txt, K
+	If (FileSize > 100) {
+		FileDelete, ../debug_log.txt
+	}
 	
 	FormatTime, TimeString, T12, Time
 	stamp = [%A_YYYY%/%A_MM%/%A_DD% %TimeString%]
@@ -1124,9 +1126,11 @@ GetPoELogFileFromRegistry(){
 		}
 	}
 	Else If standalone {
+		;MsgBox % "Standalone " standalone
 		logPath := standalone
 	}
 	Else If steam {
+		;MsgBox % "Steam " steam
 		logPath := steam
 	}
 
