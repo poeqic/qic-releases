@@ -15,6 +15,7 @@ q(\d{1,2})						=		q_min=$GROUP1
 q(\d{1,2})-(\d{1,2})			=		q_min=$GROUP1&q_max=$GROUP2
 
 lvl(\d+)						=		rlevel_max=$GROUP1
+lvl(\d{1,2})-(\d{1,2})			=		rlevel_min=$GROUP1&rlevel_max=$GROUP2
 rstr							=		rstr_min=1
 (\d+)rstr						=		rstr_max=$GROUP1
 rdex							=		rdex_min=1
